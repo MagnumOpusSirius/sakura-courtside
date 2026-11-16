@@ -10,7 +10,7 @@
 /* Layout: one 4:5 game screen that fits the viewport, a D-pad under it on touch screens, a one-line key hint on desktop. */
 :root{
   --bg:#f6efe9; --fg:#2c2233; --muted:#6f6177; --panel:#ffffff; --line:#e3d3d8; --accent:#0a7a3f; --accent-ink:#ffffff;
-  --chrome:330px;
+  --chrome:365px;
   --pixel:"VT323","Courier New",ui-monospace,monospace;
   --marker:"Permanent Marker","Marker Felt","Comic Sans MS",cursive;
 }
@@ -24,7 +24,7 @@
   --bg:#131428; --fg:#f1e7ef; --muted:#a99db3; --panel:#1d1f3a; --line:#2f3157; --accent:#4fd08a; --accent-ink:#0c2417;
   color-scheme:dark;
 }
-@media (hover:hover) and (pointer:fine){ :root{--chrome:170px} }
+@media (hover:hover) and (pointer:fine){ :root{--chrome:205px} }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{background:var(--bg);color:var(--fg);font-family:var(--pixel);font-size:20px;line-height:1.15}
@@ -52,6 +52,8 @@ h1 span{color:var(--accent)}
 
 .dialog{position:absolute;left:3%;right:3%;bottom:3%;background:#fffaf0;color:#2c2233;border:4px solid #2c2233;border-radius:12px;padding:12px 14px 16px;min-height:27%;cursor:pointer;font-size:clamp(1.35rem,5.8vw,1.75rem);line-height:1.1}
 .dialog.top{bottom:auto;top:3%}
+.dialog.chapter p{font-family:var(--marker);font-size:1.2em;color:#c2356a;text-align:center;padding-top:.25em}
+.task{margin:0;min-height:1.2em;text-align:center;font-size:1.05rem;text-wrap:balance}
 .dialog .who{display:inline-block;background:#2c2233;color:#fffaf0;font-weight:400;font-size:.8em;padding:1px 10px;border-radius:6px;margin-bottom:6px}
 .dialog p{margin:0}
 .dialog .more{position:absolute;right:12px;bottom:6px;font-size:.8em;animation:nudge .8s steps(2) infinite}
@@ -82,8 +84,8 @@ h1 span{color:var(--accent)}
       <div class="tally" id="tally">Baskets 0 / 3</div>
       <button type="button" class="pill" id="leave">Back to the garden</button>
       <div class="card" id="card" hidden>
-        <h2>Happy Birthday!</h2>
-        <p>From Indore to Boston, everyone came out for you. Make a wish!</p>
+        <h2>Happy Birthday, Bhabisa!</h2>
+        <p>Hope you have a lovely day, and a year full of new bakeries, big wins and everything you believe in.</p>
         <div class="row">
           <button type="button" class="pill" id="again">Back to the garden</button>
           <button type="button" class="pill" id="tohoops">Shoot hoops</button>
@@ -96,6 +98,8 @@ h1 span{color:var(--accent)}
       <span class="more" aria-hidden="true">&#9660;</span>
     </div>
   </div>
+
+  <p class="task" id="task" aria-live="polite"></p>
 
   <div class="pad" id="pad" aria-label="Move">
     <button type="button" class="u" data-dir="up" id="pad-up" aria-label="Up">&#9650;</button>
@@ -110,7 +114,7 @@ h1 span{color:var(--accent)}
 (function(){
   'use strict';
   /* ---------- shared ---------- */
-  var KEY='sakura-courtside-quest';
+  var KEY='sakura-courtside-quest-v2';
   var stage=document.getElementById('stage'), wc=document.getElementById('world'), w=wc.getContext('2d');
   var photo=document.getElementById('photo'), cv=document.getElementById('game'), ctx=cv.getContext('2d');
   var note=document.getElementById('note'), tally=document.getElementById('tally'), leave=document.getElementById('leave'), card=document.getElementById('card');
@@ -119,13 +123,19 @@ h1 span{color:var(--accent)}
   var scene='world', time=0, last=0, dlg=null, pressed=[];
   var ITEMS=['gift','candles','lilies','cake','poha','latte','biscuits'];
   var GOT={gift:'You found a gift box!',candles:'You found the birthday candles!',lilies:'You got a bouquet of pink lilies!',cake:'You got the birthday cake!',biscuits:'You got a box of biscuits!',poha:'You got hot poha-jalebi!',latte:'You got a warm maple latte!'};
-  var inv={};
-  try{var sv=JSON.parse(localStorage.getItem(KEY)||'{}');ITEMS.forEach(function(id){if(sv[id])inv[id]=1;});}catch(e){}
-  function save(){try{localStorage.setItem(KEY,JSON.stringify(inv));}catch(e){}}
+  var inv={}, Q={coach:0,foodie:0,vendor:0,gardener:0,baker:0}, chai=false, leaves={};
+  try{
+    var sv=JSON.parse(localStorage.getItem(KEY)||'{}');
+    if(sv.inv)ITEMS.forEach(function(id){if(sv.inv[id])inv[id]=1;});
+    if(sv.q){for(var qk in Q){if(typeof sv.q[qk]==='number')Q[qk]=sv.q[qk];}}
+    chai=!!sv.chai;
+    if(sv.leaves){for(var lk in sv.leaves){leaves[lk]=1;}}
+  }catch(e){}
+  function save(){try{localStorage.setItem(KEY,JSON.stringify({inv:inv,q:Q,chai:chai,leaves:leaves}));}catch(e){}updateTask();}
   function count(){var n=0;ITEMS.forEach(function(id){if(inv[id])n++;});return n;}
 
   /* ---------- dialogue ---------- */
-  function showLine(){elWho.textContent=dlg.who;elWho.hidden=!dlg.who;elLine.textContent=dlg.lines[dlg.i];}
+  function showLine(){var L=dlg.lines[dlg.i],who=dlg.who,text=L;if(typeof L!=='string'){who=L[0];text=L[1];}elWho.textContent=who;elWho.hidden=!who;elLine.textContent=text;elDialog.classList.toggle('chapter',who==='New chapter');}
   function talk(who,lines,done){dlg={who:who,lines:lines,i:0,done:done,at:Date.now()};pressed.length=0;showLine();elDialog.classList.toggle('top',pl.y*TS-Math.max(0,Math.min(MH*TS-VH,pl.y*TS+8-VH/2))>VH*.5);elDialog.hidden=false;}
   function advance(){
     if(!dlg||Date.now()-dlg.at<180)return;
@@ -134,8 +144,8 @@ h1 span{color:var(--accent)}
     else showLine();
   }
   function give(id,who,lines){
-    inv[id]=1;save();lines.push(GOT[id]);
-    if(count()===ITEMS.length)lines.push("That's all seven! Head back to the big cherry tree.");
+    inv[id]=1;save();lines.push(['',GOT[id]]);
+    if(count()===ITEMS.length)lines.push(['',"That's all seven! Head back to the big cherry tree."]);
     talk(who,lines);
   }
 
@@ -313,6 +323,35 @@ h1 span{color:var(--accent)}
   NPCS.forEach(function(n){n.hx=n.x;n.hy=n.y;n.spr2=flip(n.spr);});
   var party=false, PARTY={coach:[9,15],baker:[10,14],gardener:[14,14],fan:[15,15],vendor:[14,16],foodie:[10,16]};
   var GROUND=[{id:'gift',x:1,y:1},{id:'candles',x:21,y:16}];
+  var LEAVES=[{x:15,y:2},{x:13,y:5},{x:22,y:10},{x:16,y:15},{x:6,y:13}];
+  function leafCount(){var n=0;for(var i=0;i<LEAVES.length;i++){if(leaves[i])n++;}return n;}
+  var elTask=document.getElementById('task');
+  function updateTask(){
+    var t=[], pre='Tasks: ';
+    if(dance)t.push('Press the arrows in the order shown');
+    else if(party){pre='';t.push('Happy Birthday!');}
+    else if(count()===ITEMS.length)t.push('Go back to the big cherry tree');
+    else{
+      if(Q.coach===1&&!inv.biscuits)t.push('Sink 3 shots for Ted Lasso');
+      if(Q.foodie===1)t.push(leafCount()<LEAVES.length?('Maple leaves '+leafCount()+' of '+LEAVES.length):'Take the leaves to the Boston foodie');
+      if(Q.vendor===1)t.push(chai?'Take the chai to the Sarafa vendor':'Fetch chai from the tea house');
+      if(Q.baker===1)t.push(inv.candles?'Take the candles to the tea house':'Find birthday candles for the cake');
+      if(Q.gardener===1)t.push('Dance with the Gardener');
+      if(!t.length)t.push('Talk to everyone in the garden');
+    }
+    elTask.textContent=pre+t.join(' / ');
+  }
+  var ARW=[[4,0,1],[3,1,3],[2,2,5],[1,3,7],[3,4,3],[3,5,3],[3,6,3],[3,7,3],[3,8,3]];
+  function arrow(g,dir,x,y,col){
+    g.fillStyle=col;
+    for(var r=0;r<ARW.length;r++){
+      var a=ARW[r][0], yy=ARW[r][1], len=ARW[r][2];
+      if(dir==='up')g.fillRect(x+a,y+yy,len,1);
+      else if(dir==='down')g.fillRect(x+a,y+8-yy,len,1);
+      else if(dir==='left')g.fillRect(x+yy,y+a,1,len);
+      else g.fillRect(x+8-yy,y+a,1,len);
+    }
+  }
   var KOI=[{x0:26,y:156,r:60,sp:.45,ph:0},{x0:50,y:178,r:50,sp:.33,ph:2},{x0:182,y:166,r:50,sp:.4,ph:4}];
 
   function drawItem(g,id,x,y){
@@ -338,6 +377,8 @@ h1 span{color:var(--accent)}
     }else if(id==='latte'){
       R(g,'#ffffff',x+6,y+1,1,2);R(g,'#ffffff',x+9,y+2,1,2);
       R(g,'#c9c5d6',x+3,y+4,10,2);R(g,'#ffffff',x+4,y+6,8,8);R(g,'#b5743c',x+4,y+8,8,4);R(g,'#e8842c',x+7,y+9,2,2);R(g,'#dcdce6',x+5,y+14,6,1);
+    }else if(id==='leaf'){
+      R(g,'#d9463e',x+5,y+6,6,5);R(g,'#d9463e',x+4,y+8,8,2);R(g,'#d9463e',x+7,y+4,2,2);R(g,'#e8842c',x+6,y+7,2,2);R(g,'#f6b04a',x+9,y+6,1,1);R(g,'#6d4838',x+8,y+11,1,3);
     }else if(id==='biscuits'){
       R(g,'#f3d79a',x+4,y+4,3,4);R(g,'#f3d79a',x+9,y+4,3,4);R(g,'#dcb96a',x+5,y+5,1,1);R(g,'#dcb96a',x+10,y+5,1,1);
       R(g,'#f7a8c4',x+2,y+7,12,7);R(g,'#ee6fa0',x+2,y+7,12,2);R(g,'#ffffff',x+7,y+10,2,2);
@@ -348,8 +389,8 @@ h1 span{color:var(--accent)}
   var DX={left:-1,right:1,up:0,down:0}, DY={left:0,right:0,up:-1,down:1};
   var pl={x:12,y:16,nx:12,ny:16,dir:'up',moving:false,prog:0,step:0};
   function npcAt(x,y){for(var i=0;i<NPCS.length;i++){if(NPCS[i].x===x&&NPCS[i].y===y)return NPCS[i];}return null;}
-  function pending(n){return (n.id==='coach'&&!inv.biscuits)||(n.id==='baker'&&!inv.cake)||(n.id==='gardener'&&!inv.lilies)||(n.id==='vendor'&&!inv.poha)||(n.id==='foodie'&&!inv.latte);}
-  function intro(){talk('Sign',['Happy Birthday!','Seven birthday surprises are hidden around this garden.','Find them all, then come back to this cherry tree.']);}
+  function pending(n){return (n.id==='coach'&&!inv.biscuits)||(n.id==='baker'&&(!inv.cake||(Q.vendor===1&&!chai)))||(n.id==='gardener'&&!inv.lilies)||(n.id==='vendor'&&!inv.poha)||(n.id==='foodie'&&!inv.latte);}
+  function intro(){talk('Sign',['Happy Birthday!','Seven birthday surprises are hidden around this garden.','Some are hidden. Others you will have to earn from the folks around here.','Find them all, then come back to this cherry tree.']);}
   function treeTalk(){
     var c=count();
     if(c<ITEMS.length)talk('Sign',['Happy Birthday!','Surprises found: '+c+' of '+ITEMS.length+'. Keep looking!']);
@@ -357,27 +398,66 @@ h1 span{color:var(--accent)}
     else talk('Sign',['You found every surprise!','Wait... do you hear music?'],startParty);
   }
   function startParty(){
-    party=true;
+    party=true;updateTask();
     NPCS.forEach(function(n){var p=PARTY[n.id];if(p){n.x=p[0];n.y=p[1];}});
     talk('Everyone',['Happy Birthday!','Ghoomar time! Round and round we go!','Now close your eyes and make a wish...'],startFinale);
+  }
+  var CH='New chapter', dance=null, SEQ=['left','up','right','down','left','up','right','down'];
+  function startDance(){dance={i:0,flash:0};updateTask();}
+  function danceStep(d){
+    pl.dir=d;
+    if(d===SEQ[dance.i]){
+      dance.i++;
+      if(dance.i>=SEQ.length){dance=null;Q.gardener=2;give('lilies','Gardener',['Beautiful! You spin like the petals.','I grew these pink lilies just for you.']);}
+    }else dance.flash=.3;
   }
   function talkNpc(n){
     if(party&&n.id!=='coach'){talk(n.name,['Happy Birthday! Keep spinning!']);return;}
     if(n.id==='coach'){
-      if(!inv.biscuits)talk(n.name,['Howdy! Well, look who it is. The birthday star!','I believe in believe. And I believe you can sink 3 shots.','Do that, and this box of biscuits is yours.'],function(){startHoops(true);});
-      else talk(n.name,['Biscuits with the boss. Best part of the day.','Go on, the court is yours. Shoot as long as you like.'],function(){startHoops(false);});
+      if(!inv.biscuits){
+        var tl=['Howdy! Well, look who it is. The birthday star!','I believe in believe. And I believe you can sink 3 shots.','Do that, and this box of biscuits is yours.'];
+        if(!Q.coach){tl.unshift([CH,'Believe']);Q.coach=1;save();}
+        talk(n.name,tl,function(){startHoops(true);});
+      }else talk(n.name,['Biscuits with the boss. Best part of the day.','Go on, the court is yours. Shoot as long as you like.'],function(){startHoops(false);});
     }else if(n.id==='baker'){
-      if(!inv.cake)give('cake',n.name,["Welcome! It's no Rajwada palace, but the chai is hot.",'One strawberry birthday cake, fresh and fluffy.','I tucked in a cannoli too, North End style.']);
-      else talk(n.name,['Save me a slice, okay?']);
+      if(Q.vendor===1&&!chai){chai=true;save();talk(n.name,['Chai for the Sarafa vendor? One hot kettle, coming right up.',['','You got a kettle of chai!']]);return;}
+      if(inv.cake){talk(n.name,['Save me a slice, okay?']);return;}
+      var bl=[];
+      if(!Q.baker){bl.push([CH,'The birthday cake'],"Welcome! It's no Rajwada palace, but the chai is hot.");Q.baker=1;}
+      if(inv.candles){
+        bl.push('You brought candles! Now it is a real birthday cake.','One strawberry cake, fresh and fluffy. I tucked in a cannoli too, North End style.');
+        Q.baker=2;give('cake',n.name,bl);
+      }else{
+        bl.push('Your strawberry cake is ready, but I am all out of candles!','Find some birthday candles and bring them to me.');
+        save();talk(n.name,bl);
+      }
     }else if(n.id==='gardener'){
-      if(!inv.lilies)give('lilies',n.name,["Oh, it's today, isn't it?",'I grew these pink lilies just for you.']);
-      else talk(n.name,['The garden blooms brighter on birthdays.','Save your energy. I hear there is ghoomar later!']);
+      if(inv.lilies){talk(n.name,['The garden blooms brighter on birthdays.','Save your energy. I hear there is more ghoomar later!']);return;}
+      var gl=Q.gardener?['Ready? Follow the arrows!']:[[CH,'Ghoomar in the garden'],"Oh, it's today, isn't it?",'Before your gift, dance with me! A proper ghoomar twirl.','Turn the way the arrows show. Two full spins!'];
+      Q.gardener=1;save();
+      talk(n.name,gl,startDance);
     }else if(n.id==='foodie'){
-      if(!inv.latte)give('latte',n.name,['Fall in Boston! Red leaves on the Common and perfect scarf weather.','My list this week: a new bakery, dumplings in Chinatown, and that ramen place everyone talks about.','Here, a warm maple latte for the walk.']);
-      else talk(n.name,['So many bakeries, so little time. Where are we eating next?']);
+      if(inv.latte){talk(n.name,['So many bakeries, so little time. Where are we eating next?']);return;}
+      if(!Q.foodie){
+        Q.foodie=1;save();
+        talk(n.name,[[CH,'Fall in Boston'],'Fall in Boston! Red leaves on the Common and perfect scarf weather.','But the wind just scattered my five prettiest maple leaves across the garden.','Find them for me and the first round is on me.']);
+      }else if(leafCount()<LEAVES.length){
+        talk(n.name,['You have '+leafCount()+' of '+LEAVES.length+' leaves. Look near the maple trees.','One blew all the way to the south-west corner!']);
+      }else{
+        Q.foodie=2;
+        give('latte',n.name,['You found them all! These are going straight on my fridge.','My list this week: a new bakery, dumplings in Chinatown, and that ramen place everyone talks about.','Here, a warm maple latte for the walk.']);
+      }
     }else if(n.id==='vendor'){
-      if(!inv.poha)give('poha',n.name,['Namaste! Straight from Sarafa Bazaar, open all night just for you.','Hot poha with sev, and a jalebi on the side. A proper Indori birthday breakfast!']);
-      else talk(n.name,['Come back later for garadu and bhutte ka kees!']);
+      if(inv.poha){talk(n.name,['Come back later for garadu and bhutte ka kees!']);return;}
+      if(!Q.vendor){
+        Q.vendor=1;save();
+        talk(n.name,[[CH,'A taste of Indore'],'Namaste! Straight from Sarafa Bazaar, open all night just for you.','The poha is almost ready. But poha without chai? Never.','Fetch a kettle of chai from the tea house and breakfast is yours.']);
+      }else if(!chai){
+        talk(n.name,['No chai yet? The tea house is up north, across the red bridge.']);
+      }else{
+        chai=false;Q.vendor=2;
+        give('poha',n.name,['Ahh, hot chai! Perfect.','Poha with sev, and a jalebi on the side. A proper Indori birthday breakfast!']);
+      }
     }else{
       var lines=['The greatest team in the world wears green. No debate.',"And Indore is India's cleanest city. Also no debate.",'Boston in the fall plus a Celtics home game? Perfect day.'];
       if(!inv.gift)lines.push('Psst. Something shiny is tucked in the far corner, up past the tea house.');
@@ -391,9 +471,20 @@ h1 span{color:var(--accent)}
       var it=GROUND[i];
       if(!inv[it.id]&&it.x===pl.x&&it.y===pl.y){give(it.id,'',[]);return;}
     }
+    if(Q.foodie===1){
+      for(i=0;i<LEAVES.length;i++){
+        if(!leaves[i]&&LEAVES[i].x===pl.x&&LEAVES[i].y===pl.y){
+          leaves[i]=1;save();
+          var n=leafCount();
+          talk('',n<LEAVES.length?['You found a maple leaf! ('+n+' of '+LEAVES.length+')']:['You found the last maple leaf!','Take them back to the Boston foodie.']);
+          return;
+        }
+      }
+    }
   }
   function updateWorld(dt){
     if(dlg)return;
+    if(dance){dance.flash=Math.max(0,dance.flash-dt);return;}
     if(pl.moving){
       pl.prog+=dt/.19;
       if(pl.prog>=1){pl.x=pl.nx;pl.y=pl.ny;pl.moving=false;pl.prog=0;arrive();if(dlg)return;}
@@ -431,7 +522,10 @@ h1 span{color:var(--accent)}
     for(i=0;i<GROUND.length;i++){
       if(!inv[GROUND[i].id])drawItem(w,GROUND[i].id,GROUND[i].x*TS-cx,GROUND[i].y*TS-cy-(still?0:Math.floor(time*2.5)%2));
     }
-    var ents=NPCS.map(function(n,j){var hop=party&&!still&&Math.floor(time*4+j)%2;return {y:n.y*TS,x:n.x*TS,spr:hop?n.spr2:n.spr,lift:hop?2:0};});
+    if(Q.foodie===1){
+      for(i=0;i<LEAVES.length;i++){if(!leaves[i])drawItem(w,'leaf',LEAVES[i].x*TS-cx,LEAVES[i].y*TS-cy-(still?0:Math.floor(time*2.5+i)%2));}
+    }
+    var ents=NPCS.map(function(n,j){var hop=(party||(dance&&n.id==='gardener'))&&!still&&Math.floor(time*4+j)%2;return {y:n.y*TS,x:n.x*TS,spr:hop?n.spr2:n.spr,lift:hop?2:0};});
     var spin=party&&dlg&&!still, frames=PS[spin?['down','left','up','right'][Math.floor(time*6)%4]:pl.dir], fr=0;
     if(pl.moving&&pl.prog<.5)fr=(pl.dir==='left'||pl.dir==='right')?1:(pl.step%2?1:2);
     ents.push({y:ppy,x:ppx,spr:frames[fr]});
@@ -452,6 +546,13 @@ h1 span{color:var(--accent)}
     R(w,'rgba(24,18,40,.62)',2,2,ITEMS.length*18+4,20);
     for(i=0;i<ITEMS.length;i++){w.globalAlpha=inv[ITEMS[i]]?1:.28;drawItem(w,ITEMS[i],5+i*18,4);}
     w.globalAlpha=1;
+    if(dance){
+      var bx=Math.floor((VW-SEQ.length*14-6)/2), by2=30;
+      R(w,'rgba(24,18,40,.8)',bx,by2,SEQ.length*14+6,17);
+      for(i=0;i<SEQ.length;i++){
+        arrow(w,SEQ[i],bx+5+i*14,by2+4,i<dance.i?'#4fd08a':(i===dance.i?(dance.flash>0?'#ff6b6b':(Math.floor(time*4)%2?'#ffe07a':'#fff6c9')):'#8d8aa6'));
+      }
+    }
   }
 
   /* ---------- portrait: hoops and finale ---------- */
@@ -630,6 +731,7 @@ h1 span{color:var(--accent)}
   function press(d){
     if(dlg){advance();return;}
     if(scene!=='world')return;
+    if(dance){danceStep(d);return;}
     var i=pressed.indexOf(d);if(i>=0)pressed.splice(i,1);
     pressed.push(d);
   }
@@ -657,7 +759,7 @@ h1 span{color:var(--accent)}
   }
   stage.addEventListener('click',function(){if(dlg)advance();});
   document.getElementById('reset').addEventListener('click',function(){
-    inv={};save();dlg=null;elDialog.hidden=true;party=false;NPCS.forEach(function(n){n.x=n.hx;n.y=n.hy;});
+    inv={};Q={coach:0,foodie:0,vendor:0,gardener:0,baker:0};chai=false;leaves={};dance=null;party=false;save();dlg=null;elDialog.hidden=true;NPCS.forEach(function(n){n.x=n.hx;n.y=n.hy;});
     scene='world';resetShots();photo.hidden=true;
     pl.x=pl.nx=12;pl.y=pl.ny=16;pl.dir='up';pl.moving=false;pl.prog=0;
     intro();
@@ -671,8 +773,9 @@ h1 span{color:var(--accent)}
     requestAnimationFrame(frame);
   }
   if(window.ResizeObserver){new ResizeObserver(sizePhoto).observe(stage);}else{window.addEventListener('resize',sizePhoto);}
+  updateTask();
   drawWorld();
-  if(count()===0)intro();
+  if(count()===0&&!Q.coach&&!Q.foodie&&!Q.vendor&&!Q.gardener&&!Q.baker)intro();
   requestAnimationFrame(function(t){last=t;frame(t);});
 })();
 </script>
